@@ -5794,6 +5794,35 @@ step_install_dnstm() {
         exit 1
     fi
 
+    # ── GLIBC compatibility check ──────────────────────────────────────────
+    # The dnstm binary requires GLIBC >= 2.34.  Older distros (Debian 11,
+    # Ubuntu 20.04) ship GLIBC 2.31 and will fail with a cryptic loader
+    # error.  Detect this early and give an actionable error message.
+    if ldd /usr/local/bin/dnstm 2>&1 | grep -qi "not found"; then
+        echo ""
+        local sys_glibc
+        sys_glibc=$(ldd --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+$' || echo "unknown")
+        print_fail "dnstm binary is incompatible with this system"
+        echo ""
+        echo -e "  ${BOLD}Problem:${NC}  dnstm requires GLIBC >= 2.34, but this system has GLIBC ${sys_glibc}"
+        echo ""
+        echo -e "  ${BOLD}Supported distributions:${NC}"
+        echo "    - Ubuntu 22.04 (Jammy) or newer"
+        echo "    - Debian 12 (Bookworm) or newer"
+        echo ""
+        echo -e "  ${BOLD}How to fix:${NC}"
+        echo "    Option 1: Upgrade your OS to a supported version"
+        echo "    Option 2: Re-deploy on a VPS with Ubuntu 22.04+ or Debian 12+"
+        echo ""
+        echo -e "  ${DIM}Technical details:${NC}"
+        ldd /usr/local/bin/dnstm 2>&1 | grep -i "not found" | while IFS= read -r line; do
+            echo -e "    ${DIM}${line}${NC}"
+        done
+        echo ""
+        rm -f /usr/local/bin/dnstm
+        exit 1
+    fi
+
     # Save iptables state before dnstm install (it may reset firewall rules)
     local iptables_backup="/tmp/iptables-backup-$$"
     iptables-save > "$iptables_backup" 2>/dev/null || true
@@ -5802,7 +5831,9 @@ step_install_dnstm() {
     print_info "Running dnstm install --mode multi ..."
     echo ""
     local install_ok=false
-    if dnstm install --mode multi --force; then
+    local install_stderr
+    install_stderr=$(mktemp /tmp/dnstm-install-err-XXXXXX 2>/dev/null || echo "/tmp/dnstm-install-err-$$")
+    if dnstm install --mode multi --force 2> >(tee "$install_stderr" >&2); then
         echo ""
         install_ok=true
         print_ok "dnstm installed successfully"
@@ -5810,7 +5841,16 @@ step_install_dnstm() {
     else
         echo ""
         print_fail "dnstm install failed"
+        # Show captured stderr for diagnostics
+        if [[ -s "$install_stderr" ]]; then
+            echo ""
+            print_info "Error details:"
+            head -20 "$install_stderr" | while IFS= read -r line; do
+                echo -e "    ${DIM}${line}${NC}"
+            done
+        fi
     fi
+    rm -f "$install_stderr"
 
     # Restore original firewall rules (dnstm install may have reset them)
     if [[ -s "$iptables_backup" ]]; then
