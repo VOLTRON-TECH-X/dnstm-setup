@@ -4910,6 +4910,9 @@ do_add_xray() {
 
                 install_3xui "$new_user" "$new_pass" "$new_port" || return 1
 
+                # Re-detect to pick up the randomly generated webBasePath
+                detect_xray_panel
+
                 # Use ACTUAL values (may differ from requested if sqlite3 failed)
                 XRAY_PANEL_TYPE="3xui"
                 XRAY_PANEL_PORT="${INSTALL_3XUI_ACTUAL_PORT}"
